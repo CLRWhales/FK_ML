@@ -1,0 +1,8 @@
+# Ignore the virtual environment directory
+venv/
+
+#ignore potential ini files
+*.ini
+
+#ignore pycache
+__pycache__/
