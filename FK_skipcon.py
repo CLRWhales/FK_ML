@@ -83,36 +83,42 @@ class Autoencoder(nn.Module):
         self.open = recoded(9, 128 * 4 * 8)
         self.uflat1 = nn.Unflatten(1, (128, 4, 8))
 
-        self.dec6 = deconv_block(128, 128) #undoes the extra layer
-        self.dec5 = deconv_block(128, 64)
-        self.dec4 = deconv_block(64, 32)
-        self.dec3 = deconv_block(32, 16)
-        self.dec2 = deconv_block(16, 8)
-        self.dec1 = nn.ConvTranspose2d(8, 1, kernel_size=3, stride=2, padding=1, output_padding=1) # back to 1 channel, seperate because no/linear activation
-
+        self.dec6 = deconv_block(256, 128) #undoes the extra layer
+        self.dec5 = deconv_block(256, 64)
+        self.dec4 = deconv_block(128, 32)
+        self.dec3 = deconv_block(64, 16)
+        self.dec2 = deconv_block(32, 8)
+        self.dec1 = nn.ConvTranspose2d(16, 1, kernel_size=3, stride=2, padding=1, output_padding=1) # back to 1 channel, seperate because linear activation (ie no activation)
+ 
     def forward(self, x):
         # Encode
-        x = self.enc1(x)   # [B, 8, 128, 256]
-        x = self.enc2(x)   # [B, 16, 64, 128]
-        x = self.enc3(x)   # [B, 32, 32, 64]
-        x = self.enc4(x)   # [B, 64, 16, 32]
-        x = self.enc5(x)   # [B, 128, 8, 16]
-        x = self.enc6(x)
+        e1 = self.enc1(x)   # [B, 8, 128, 256]
+        e2 = self.enc2(e1)   # [B, 16, 64, 128]
+        e3 = self.enc3(e2)   # [B, 32, 32, 64]
+        e4 = self.enc4(e3)   # [B, 64, 16, 32]
+        e5 = self.enc5(e4)   # [B, 128, 8, 16]
+        e6 = self.enc6(e5)
 
-        x = self.flat1(x)  # [B, 128*8*16]
-        x = self.bottleneck(x)  # [B, 9]
-        x = self.open(x)   # [B, 128*8*16]
-        x = self.uflat1(x)  # [B, 128, 8, 16]
+        flat = self.flat1(e6)  # [B, 128*8*16]
+        bot = self.bottleneck(flat)  # [B, 9]
+        op = self.open(bot)   # [B, 128*8*16]
+        uflat = self.uflat1(op)  # [B, 128, 8, 16]
 
-        # Decode (mirror of encoder)
-        x = self.dec6(x)
-        x = self.dec5(x)  # [B, 64, 16, 32]
-        x = self.dec4(x)  # [B, 32, 32, 64]
-        x = self.dec3(x)  # [B, 16, 64, 128]
-        x = self.dec2(x)  # [B, 8, 128, 256]
-        x = self.dec1(x)  # [B, 1, 256, 512]
+        # Decode with skip conn (mirror of encoder)
+        uflat = torch.concat([e6,uflat], axis=1)
+        dec6 = self.dec6(uflat)
+        dec6 = torch.concat([e5,dec6], axis = 1)
+        dec5 = self.dec5(dec6)  # [B, 64, 16, 32]
+        dec5 = torch.concat([e4,dec5], axis = 1)
+        dec4 = self.dec4(dec5)  # [B, 32, 32, 64]
+        dec4 = torch.concat([e3,dec4], axis = 1)
+        dec3 = self.dec3(dec4)  # [B, 16, 64, 128]
+        dec3 = torch.concat([e2,dec3], axis = 1)
+        dec2 = self.dec2(dec3)  # [B, 8, 128, 256]
+        dec2 = torch.concat([e1,dec2],axis = 1)
+        dec1 = self.dec1(dec2)  # [B, 1, 256, 512]
 
-        return x
+        return dec1
 
 #=== custom crop to remove nyquist ===
 class RemoveBottomRow:
@@ -131,9 +137,9 @@ if __name__ == '__main__':
     mask_prob = 0.0
     test_proportion = 0.8
     nepochs = 100
-    patience = 5
-    min_delta = 1e-4
-    name = 'v2'
+    patience = 10
+    min_delta = 1e-6
+    name = 'v2_skipcon_'
     
 
     inputlist = [batch_size, num_workers, LR, mask_prob, test_proportion,nepochs,patience,min_delta]
@@ -170,6 +176,7 @@ if __name__ == '__main__':
     model = Autoencoder().to(device)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
+    #scheduler = torch.optim.lr_scheduler.
 
     best_val_loss = float('inf')
     train_losses = []
@@ -226,7 +233,10 @@ if __name__ == '__main__':
         
         patience_track.append(counter)
         if counter >= patience:
-            print('Run out of patience :(, stopping early')
+            print('Ran out of patience >:(, stopping early')
+            pathname = os.path.join(outputdir, 'Epoch' + str(epoch) + '_final.pth')
+            torch.save(model.state_dict(), pathname)
+            print("✅ Saved final model.")
             break
     
     df = pd.DataFrame({'train_loss': train_losses, 'val_loss': eval_losses,'patience':patience_track})
@@ -239,12 +249,14 @@ if __name__ == '__main__':
     axis[0].plot(eval_losses, label = 'Validation')
     axis[0].set_xlabel('epoch')
     axis[0].set_ylabel('MSE')
+    axis[0].set_yscale('log')
     axis[0].legend(loc = 'upper right')
 
     axis[1].plot(patience_track)
     axis[1].set_xlabel('epoch')
     axis[1].set_ylabel('patience')
     pname = os.path.join(outputdir,'train_plot.jpeg')
+    plt.tight_layout()
     plt.savefig(pname)
     plt.close()
      
