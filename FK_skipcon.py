@@ -138,8 +138,8 @@ if __name__ == '__main__':
     test_proportion = 0.8
     nepochs = 100
     patience = 10
-    min_delta = 1e-6
-    name = 'v2_skipcon_'
+    min_delta = 1e-5
+    name = 'v2_skipconEX_'
     
 
     inputlist = [batch_size, num_workers, LR, mask_prob, test_proportion,nepochs,patience,min_delta]
