@@ -89,35 +89,32 @@ class Autoencoder(nn.Module):
         self.dec3 = deconv_block(64, 16)
         self.dec2 = deconv_block(32, 8)
         self.dec1 = nn.ConvTranspose2d(16, 1, kernel_size=3, stride=2, padding=1, output_padding=1) # back to 1 channel, seperate because linear activation (ie no activation)
- 
-    def forward(self, x):
-        # Encode
+    
+    def encode(self,x): #could likely make all these sequential but this framing allows for future use with ski connections
         e1 = self.enc1(x)   # [B, 8, 128, 256]
         e2 = self.enc2(e1)   # [B, 16, 64, 128]
         e3 = self.enc3(e2)   # [B, 32, 32, 64]
         e4 = self.enc4(e3)   # [B, 64, 16, 32]
         e5 = self.enc5(e4)   # [B, 128, 8, 16]
         e6 = self.enc6(e5)
-
         flat = self.flat1(e6)  # [B, 128*8*16]
         bot = self.bottleneck(flat)  # [B, 9]
+        return bot, e1,e2,e3,e4,e5,e6
+
+    def decode(self,bot,e1,e2,e3,e4,e5,e6):
         op = self.open(bot)   # [B, 128*8*16]
         uflat = self.uflat1(op)  # [B, 128, 8, 16]
+        dec6 = self.dec6(torch.concat([e6,uflat], axis=1))
+        dec5 = self.dec5(torch.concat([e5,dec6], axis = 1))  # [B, 64, 16, 32]
+        dec4 = self.dec4(torch.concat([e4,dec5], axis = 1))  # [B, 32, 32, 64]
+        dec3 = self.dec3(torch.concat([e3,dec4], axis = 1))  # [B, 16, 64, 128]
+        dec2 = self.dec2(torch.concat([e2,dec3], axis = 1))  # [B, 8, 128, 256]
+        dec1 = self.dec1(torch.concat([e1,dec2],axis = 1))  # [B, 1, 256, 512]
+        return dec1
 
-        # Decode with skip conn (mirror of encoder)
-        uflat = torch.concat([e6,uflat], axis=1)
-        dec6 = self.dec6(uflat)
-        dec6 = torch.concat([e5,dec6], axis = 1)
-        dec5 = self.dec5(dec6)  # [B, 64, 16, 32]
-        dec5 = torch.concat([e4,dec5], axis = 1)
-        dec4 = self.dec4(dec5)  # [B, 32, 32, 64]
-        dec4 = torch.concat([e3,dec4], axis = 1)
-        dec3 = self.dec3(dec4)  # [B, 16, 64, 128]
-        dec3 = torch.concat([e2,dec3], axis = 1)
-        dec2 = self.dec2(dec3)  # [B, 8, 128, 256]
-        dec2 = torch.concat([e1,dec2],axis = 1)
-        dec1 = self.dec1(dec2)  # [B, 1, 256, 512]
-
+    def forward(self, x):
+        bot, e1,e2,e3,e4,e5,e6 = self.encode(x)
+        dec1 = self.decode(bot,e1,e2,e3,e4,e5,e6)
         return dec1
 
 #=== custom crop to remove nyquist ===
@@ -139,7 +136,7 @@ if __name__ == '__main__':
     nepochs = 100
     patience = 10
     min_delta = 1e-5
-    name = 'v2_skipconEX_'
+    name = 'v2_skipconEX_refac'
     
 
     inputlist = [batch_size, num_workers, LR, mask_prob, test_proportion,nepochs,patience,min_delta]
