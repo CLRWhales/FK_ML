@@ -61,11 +61,11 @@ class UNET(nn.Module):
         skip2 = self.enc2(self.pool(skip1)) 
         skip3 = self.enc3(self.pool(skip2)) 
         skip4 = self.enc4(self.pool(skip3))
-        lowest = self.enc5(self.pool(skip4))   
-        return skip1,skip2,skip3,skip4,lowest
+        latent = self.enc5(self.pool(skip4))  
+        return latent,skip1,skip2,skip3,skip4
 
-    def decode(self,skip1,skip2,skip3,skip4,lowest):
-        L_out = self.drop(lowest)  # [B, 128*8*16]
+    def decode(self,skip1,skip2,skip3,skip4,latent):
+        L_out = self.drop(latent)  # [B, 128*8*16]
         L_out = self.dec4(torch.concat([skip4,L_out], axis = 1))  
         L_out = self.dec3(torch.concat([skip3,L_out], axis = 1))
         L_out = self.dec2(torch.concat([skip2,L_out], axis = 1))
@@ -76,6 +76,8 @@ class UNET(nn.Module):
         skip1,skip2,skip3,skip4,lowest = self.encode(x)
         dec1 = self.decode(skip1,skip2,skip3,skip4,lowest)
         return dec1
+    
+    
 
 # if __name__ == '__main__':
 #     from torchsummary import summary
