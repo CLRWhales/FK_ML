@@ -22,9 +22,13 @@ class InferenceDataset(Dataset):
 
     def __getitem__(self, idx,testing = False):
         image = Image.open(self.image_paths[idx]).convert('L')
+        fname = os.path.basename(self.image_paths[idx])
+        toff = fname.split('_')[1].split('T')[1]
+        xoff = fname.split('_')[2].split('X')[1]
+        tabs = fname.split('_')[3].split('.')[0]
         #print(image.shape)
         if self.transform:
             image = self.transform(image)
         
-        return image,  self.image_paths[idx]# (input, target)
+        return image, toff,xoff,tabs,self.image_paths[idx]
     

@@ -6,16 +6,15 @@ from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
 from PIL import Image
 import time
-from torchvision.transforms import functional as F
 import pandas as pd
 import datetime
 import matplotlib.pyplot as plt
 import matplotlib.colors as colors
-
+import torch.nn.functional as F
 #net and loader
-from MaskedImageDataset import MaskedImageDataset
-from FK_ver1 import Autoencoder as mod
-
+from Multitask_loader import Multitask_loader
+from FK_ver3 import Autoencoder as mod
+import numpy as np
 
 
 
@@ -24,29 +23,30 @@ datapath = 'D:\\DAS\\FK\\testset'
 dst = 'C:\\Users\\Calder\\Models'
 batch_size = 64
 num_workers = 4
-LR = 1e-3
-mask_prob = 0.0
+LR = 2.5e-4
 train_proportion = 0.8
 nepochs = 50
-patience = 4
-min_delta = 1e-6
-name = 'FK_ver1.2'
-test = True
+patience = 5
+min_delta = 1e-7
+name = 'FK_ver3_test'
+test = False
+lambda_recon = 0.5
+lambda_reg = 1-lambda_recon
 
 #testing the model on specific files
-testlist = [['whale1_1',os.path.join(datapath,'FK\\20220821T183537Z\\FK256_T0_X512_20220821T183537Z.png')],
-            ['whale1_2',os.path.join(datapath,'FK\\20220821T183537Z\\FK256_T0_X768_20220821T183537Z.png')],
-            ['whale2_1',os.path.join(datapath,'FK\\20220821T183537Z\\FK256_T0_X1280_20220821T183537Z.png')],
-            ['whale2_2',os.path.join(datapath,'FK\\20220821T183537Z\\FK256_T0_X1536_20220821T183537Z.png')],
-            ['nearshore1',os.path.join(datapath,'FK\\20220821T101947Z\\FK256_T0_X0_20220821T101947Z.png')],
-            ['nearshore2',os.path.join(datapath,'FK\\20220821T174057Z\\FK256_T1792_X0_20220821T174057Z.png')],
-            ['FarEnd1',os.path.join(datapath,'FK\\20220821T174057Z\\FK256_T2048_X10240_20220821T174057Z.png')],
-            ['FarEnd2',os.path.join(datapath,'FK\\20220821T174347Z\\FK256_T2048_X10240_20220821T174347Z.png')]
+testlist = [['whale1_1',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T0_X512_F44_K316_V750.0_20220821T183537Z.png"],
+            ['whale1_2',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T256_X512_F38_K325_V1850.0_20220821T183537Z.png"],
+            ['whale2_1',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T0_X1536_F94_K106_V1550.0_20220821T183537Z.png"],
+            ['whale2_2',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T768_X1536_F86_K118_V1650.0_20220821T183537Z.png"],
+            ['nearshore1',"D:\\DAS\\FK\\testset\\FK\\20220821T184417Z\\T0_X0_F4_K268_V350.0_20220821T184417Z.png"],
+            ['nearshore2',"D:\\DAS\\FK\\testset\\FK\\20220821T184417Z\\T1280_X0_F7_K29_V4450.0_20220821T184417Z.png"],
+            ['FarEnd1',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T1792_X10240_F6_K483_V150.0_20220821T183537Z.png"],
+            ['FarEnd2',"D:\\DAS\\FK\\testset\\FK\\20220821T183537Z\\T2048_X10240_F5_K31_V50.0_20220821T183537Z.png"]
             ]
     
 
 if __name__ == '__main__':
-    inputlist = [batch_size, num_workers, LR, mask_prob, train_proportion,nepochs,patience,min_delta,datapath]
+    inputlist = [batch_size, num_workers, LR, train_proportion,nepochs,patience,min_delta,datapath,lambda_recon,lambda_reg]
 
     tnow = datetime.datetime.now().strftime('%Y%m%dT%H%M%S')
     outputdir = os.path.join(dst,name + '_' + tnow)
@@ -62,11 +62,11 @@ if __name__ == '__main__':
 
     # Transforms
     transform = transforms.Compose([
-        transforms.ToTensor()#, #this also scales uint 8 inputs to range 0-1        
+        transforms.GaussianBlur(kernel_size=(5), sigma = 1) #totensor is handled internal to the loader     
     ])
 
     # Dataset and Dataloaders
-    dataset = MaskedImageDataset(datapath, transform=transform, mask_prob=mask_prob)
+    dataset = Multitask_loader(datapath, transform=transform)
     train_size = int(train_proportion * len(dataset))
     val_size = len(dataset) - train_size
     train_ds, val_ds = random_split(dataset, [train_size, val_size])
@@ -75,8 +75,8 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_ds, batch_size=batch_size, num_workers=num_workers,shuffle=False, pin_memory=True)
 
     # Model, loss, optimizer 
-    model = mod().to(device)
-    criterion = nn.MSELoss()
+    model = mod(latent_dim=128).to(device)
+    #criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
 
@@ -86,7 +86,10 @@ if __name__ == '__main__':
     LR_track = []
     counter = 0
     patience_track= []
-
+    TL_reg = []
+    TL_recon = []
+    VL_reg = []
+    VL_recon = []
     full_loss = []
 
 
@@ -95,34 +98,52 @@ if __name__ == '__main__':
         e_start = time.perf_counter()
         model.train()
         running_loss = 0.0
-        for input_img, target_img in train_loader:
+        reg_RL = 0.0
+        recon_RL = 0.0
+        for input_img, target_img, reg, in train_loader:
             input_img = input_img.to(device, non_blocking = True)
             target_img = target_img.to(device, non_blocking = True)
+            reg = reg.to(device,non_blocking = True)
 
             optimizer.zero_grad()
             #print(type(input_img), input_img.shape)
-            output = model(input_img)
-            loss = criterion(output, target_img)
+            recon,estreg,_ = model(input_img)
+            loss_recon = F.mse_loss(recon, target_img)
+            loss_reg = F.mse_loss(estreg,reg)
+            loss = lambda_recon * loss_recon + lambda_reg * loss_reg
             loss.backward()
             optimizer.step()
             running_loss += loss.item()
             full_loss.append(loss.item())
+            reg_RL +=loss_reg.item()
+            recon_RL +=loss_recon.item()
 
         avg_train_loss = running_loss / len(train_loader)
         train_losses.append(avg_train_loss)
+        TL_recon.append(recon_RL/len(train_loader))
+        TL_reg.append(reg_RL/len(train_loader))
         # Validation phase
         model.eval()
         val_loss = 0.0
+        RegVL = 0.0
+        ReconVL = 0.0
         with torch.no_grad():
-            for input_img, target_img in val_loader:
-                input_img, target_img = input_img.to(device, non_blocking = True), target_img.to(device, non_blocking = True)
-                output = model(input_img)
-                loss = criterion(output, target_img)
+            for input_img, target_img,reg in val_loader:
+                input_img = input_img.to(device, non_blocking = True)
+                target_img = target_img.to(device, non_blocking = True)
+                reg = reg.to(device,non_blocking = True)
+                recon,estreg,_ = model(input_img)
+                loss_recon = F.mse_loss(recon, target_img)
+                loss_reg = F.mse_loss(estreg,reg)
+                loss = lambda_recon * loss_recon + lambda_reg * loss_reg
                 val_loss += loss.item()
+                RegVL +=loss_reg.item()
+                ReconVL +=loss_recon.item()
 
         avg_val_loss = val_loss / len(val_loader)
         scheduler.step(avg_val_loss)
-
+        VL_reg.append(RegVL/len(val_loader))
+        VL_recon.append(ReconVL/len(val_loader))
         eval_losses.append(avg_val_loss)
         LR_track.append(optimizer.param_groups[0]['lr'])
 
@@ -151,45 +172,54 @@ if __name__ == '__main__':
             print("✅ Saved final model.")
             break
     
-    df = pd.DataFrame({'train_loss': train_losses, 'val_loss': eval_losses,'patience':patience_track,'LR':LR_track})
-    fname = os.path.join(outputdir,'loss_log.csv')
-    df.to_csv(fname, index=False)
+        df = pd.DataFrame({'train_loss': train_losses, 'val_loss': eval_losses,'patience':patience_track,'LR':LR_track,'TL_reg':TL_reg,'TL_recon':TL_recon,'VL_reg':VL_reg,'VL_recon':VL_recon})
+        fname = os.path.join(outputdir,'loss_log.csv')
+        df.to_csv(fname, index=False)
 
-    figure, axis = plt.subplots(3,1)
+        figure, axis = plt.subplots(3,1)
 
-    axis[0].plot(train_losses, label = 'Training')
-    axis[0].plot(eval_losses, label = 'Validation')
-    axis[0].set_xlabel('epoch')
-    axis[0].set_ylabel('MSE')
-    axis[0].set_yscale('log')
-    axis[0].legend(loc = 'upper right')
+        axis[0].plot(train_losses, label = 'Training')
+        axis[0].plot(eval_losses, label = 'Validation')
+        axis[0].plot(TL_recon, label = 'TL_recon')
+        axis[0].plot(TL_reg, label = 'TL_reg')
+        axis[0].plot(VL_recon, label = 'VL_recon')
+        axis[0].plot(VL_reg, label = 'VL_reg')
+        axis[0].set_xlabel('epoch')
+        axis[0].set_ylabel('MSE')
+        axis[0].set_yscale('log')
+        axis[0].legend(loc = 'upper right')
 
-    axis[1].plot(patience_track)
-    axis[1].set_xlabel('epoch')
-    axis[1].set_ylabel('patience')
+        axis[1].plot(patience_track)
+        axis[1].set_xlabel('epoch')
+        axis[1].set_ylabel('patience')
 
-    axis[2].plot(LR_track)
-    axis[2].set_xlabel('epoch')
-    axis[2].set_ylabel('Learning rate')
+        axis[2].plot(LR_track)
+        axis[2].set_xlabel('epoch')
+        axis[2].set_ylabel('Learning rate')
 
-    pname = os.path.join(outputdir,'train_plot.jpeg')
-    plt.tight_layout()
-    plt.savefig(pname)
-    plt.close()
+        pname = os.path.join(outputdir,'train_plot.jpeg')
+        plt.tight_layout()
+        plt.savefig(pname)
+        plt.close()
 
-    plt.figure()
-    plt.plot(full_loss)
-    plt.ylabel('Minibatch loss')
-    plt.yscale('log')
-    plt.xlabel('minibatch')
-    pname = os.path.join(outputdir,'minibatch.jpeg')
-    plt.tight_layout()
-    plt.savefig(pname)
-    plt.close()
+        plt.figure()
+        plt.plot(full_loss)
+        plt.ylabel('Minibatch loss')
+        plt.yscale('log')
+        plt.xlabel('minibatch')
+        pname = os.path.join(outputdir,'minibatch.jpeg')
+        plt.tight_layout()
+        plt.savefig(pname)
+        plt.close()
 
+    fname = os.path.join(outputdir,'MBloss')
+    np.save(fname,full_loss)
 
     #perfomring opional testing against certain files
     if test:
+
+        t1 = transforms.ToTensor()
+        t2 = transforms.GaussianBlur(kernel_size=(5), sigma = 1)
         mpath = glob.glob(os.path.join(outputdir,'*.pth'))[-1]
 
         testmod = mod().to(device)
@@ -200,8 +230,8 @@ if __name__ == '__main__':
         with torch.no_grad():
             for k in testlist:
                 image = Image.open(k[1]).convert('L')
-                image = transform(image).to(device)
-                result = testmod(image.unsqueeze(0))
+                image = t1(image).to(device)
+                result,reg,_ = testmod(image.unsqueeze(0))
                 #loss = criterion(result, image)
 
                 I = image.cpu().numpy().squeeze()
@@ -227,3 +257,5 @@ if __name__ == '__main__':
                 plt.tight_layout()
                 plt.savefig(fname)
                 plt.close()
+                print(k[1])
+                print(reg)

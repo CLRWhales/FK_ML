@@ -1,22 +1,35 @@
-#updated autoencoder based on spectrogram classification
 import torch.nn as nn
 
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
 
+        def preprocess(in_ch,out_ch):
+            return nn.Sequential(
+                nn.Conv2d(in_ch,out_ch,kernel_size=5,padding=2),
+                nn.BatchNorm2d(out_ch,out_ch),
+                nn.ReLU(inplace=True),
+                nn.MaxPool2d(kernel_size=(1,2),stride=(1,2))
+                )
+
         def conv_block(in_ch, out_ch, stride=2):
             return nn.Sequential(
-                nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, stride=stride),
+                nn.Conv2d(in_ch, out_ch, kernel_size=3, padding=1, stride=1),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_ch,out_ch,kernel_size=3,padding=1,stride = stride),
                 nn.BatchNorm2d(out_ch),
                 nn.ReLU(inplace=True)
             )
 
         def deconv_block(in_ch, out_ch, stride=2):
             return nn.Sequential(
-                nn.ConvTranspose2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1, output_padding=1),
+                nn.ConvTranspose2d(in_ch, in_ch, kernel_size=3, stride=stride, padding=1, output_padding=1),
+                nn.BatchNorm2d(in_ch),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(in_ch,out_ch,kernel_size=3,stride = 1,padding = 1, stride = 1),
                 nn.BatchNorm2d(out_ch),
-                nn.ReLU(inplace=True)
+                nn.ReLU(inplace=True),
             )
 
         def recoded(in_ch, out_ch):
@@ -26,19 +39,29 @@ class Autoencoder(nn.Module):
                 nn.ReLU(inplace=True)
             )
 
+        def regressionhead(in_ch,out_ch):
+            return nn.Sequential(
+                nn.Linear(in_ch,out_ch),
+                nn.Sigmoid()
+            )
+
+
         # Encoder
-        self.enc1 = conv_block(1, 8) #n 8 128 256
-        self.enc2 = conv_block(8, 16) # n 16 64 128
-        self.enc3 = conv_block(16, 32) # n 32 32 64
-        self.enc4 = conv_block(32, 64) # n 64 16 32
-        self.enc5 = conv_block(64, 128) # n 128 8 16
-        self.enc6 = conv_block(128, 128) # n 128 4 8
-        self.flat1 = nn.Flatten()
-        self.bottleneck = recoded(128 * 4 * 8, 128)
+        self.prep = preprocess(1,32) #n 32, 256 256
+        self.enc1 = conv_block(32, 64) #n 64 128 128
+        self.enc2 = conv_block(64, 128) # n 128 64 64
+        self.enc3 = conv_block(128, 256) # n 256 32 32
+        self.enc4 = conv_block(256, 512) # n 512 16 16
+        self.enc5 = conv_block(512, 1024) # n 1024 8 8
+        self.enc6 = conv_block(1024, 2048) # n 2048 4 4
+        self.enc7 = conv_block(2048,4096) # n 4096 2 2
+        self.flat1 = nn.Sequential(nn.AdaptiveMaxPool2d(output_size=(1, 1)),nn.Dropout1d(0.5)) # n 4096 1 1
+        self.bottleneck = recoded(4096, 128) # n 128
+        self.regression = regressionhead(128,5)
 
         # Decoder
-        self.open = recoded(128, 128 * 4 * 8)
-        self.uflat1 = nn.Unflatten(1, (128, 4, 8))
+        self.open = recoded(128, 4096) # n 4096 1 1
+        self.uflat = nn.ConvTranspose2d(in_channels=4096,kernel_size=1, stride = 2, padding=2) 
         self.dec6 = deconv_block(128, 128) #n 128 8 16
         self.dec5 = deconv_block(128, 64) # n 64 16 32
         self.dec4 = deconv_block(64, 32) # n 32 32 64
