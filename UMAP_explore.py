@@ -16,20 +16,20 @@ import umap.umap_ as umap
 
 #%%
 
-path = "D:\\DAS\\FK\\testset\\meta.csv"
+path = "D:\\DAS\\FK\\meta_test_hr_20250620T162109\\meta.csv"
 data = pd.read_csv(path)
 
 data_sub = data.drop(columns=['Xoff', 'Toff'])
-SS=StandardScaler()
-X=pd.DataFrame(SS.fit_transform(data_sub), columns=data_sub.columns)
+#SS=StandardScaler()
+#X=pd.DataFrame(SS.fit_transform(data_sub), columns=data_sub.columns)
 X = data_sub
 
 plt.figure()
-plt.hist(X['F']*128,bins = 100)
+plt.hist(X['F']*128,bins = 128)
 plt.figure()
 plt.hist(X['K']*512, bins = 100)
 plt.figure()
-plt.hist(X['V']*10000, bins = 100)
+plt.hist(X['V'], bins = 100)
 
 plt.figure()
 plt.hexbin(X['F']*128,X['V']*10000)
@@ -45,13 +45,16 @@ plt.colorbar()
 plt.clim(0,40)
 plt.hlines(y = 5,xmin = 0, xmax = 1, color = 'red')
 
-calls = X[(X['V']*10000 > 1000)&(X['V']*10000 < 2000)]
+calls = X[(X['V']*10000 > 800)&(X['V']*10000 < 4000)]
 
 plt.figure()
-plt.scatter(calls['K'],calls['F'])
+plt.hexbin(calls['K'],calls['F'])
 plt.colorbar()
-plt.clim(0,10)
+plt.clim(0,20)
 
+plt.figure()
+plt.hist(calls['F']*128,bins = 128)
+plt.ylim(0,4000)
 # %% trying PCA
 pca = PCA(n_components=2)
 X_pca = pca.fit_transform(X)

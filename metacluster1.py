@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import pandas as pd
 import os
 import torch
-datapath = 'D:\\DAS\\FK\\testset'
+datapath = "D:\\DAS\\FK\\meta_test_hr_20250620T162109"
 batch_size = 64
 num_workers = 8
 transform = None

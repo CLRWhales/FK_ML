@@ -9,9 +9,10 @@ from torchvision import transforms
 
 # === Custom Dataset with Optional Masking ===
 class Multitask_loader(Dataset):
-    def __init__(self, root_dir, transform=None):
+    def __init__(self, root_dir, transform=None, mask = None):
         self.root_dir = root_dir
         self.transform = transform
+        self.mask = mask
         self.totensor = transforms.ToTensor()
         # Collect all image paths
         self.image_paths = []
@@ -28,7 +29,7 @@ class Multitask_loader(Dataset):
         
         image = self.totensor(image)
         blurred_image = image.clone()
-
+        name1 = os.path.basename(self.image_paths[idx])
         name = os.path.basename(self.image_paths[idx]).split('_')
         toff = float(name[0].split('T')[1])/2048
         xoff = float(name[1].split('X')[1])/10240
@@ -40,5 +41,5 @@ class Multitask_loader(Dataset):
         if self.transform:
             blurred_image = self.transform(image)
         
-        return image,blurred_image,reg  # (input, target)
+        return image,blurred_image,reg,name1  # (input, target)
 

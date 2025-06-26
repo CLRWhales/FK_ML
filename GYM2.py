@@ -19,7 +19,7 @@ import numpy as np
 
 
 #inputs
-datapath = 'D:\\DAS\\FK\\testset'
+datapath = 'D:\\DAS\\FK\\meta_halfday_newspeed20250621T123640'
 dst = 'C:\\Users\\Calder\\Models'
 batch_size = 64
 num_workers = 4
@@ -28,7 +28,7 @@ train_proportion = 0.8
 nepochs = 50
 patience = 5
 min_delta = 1e-7
-name = 'FK_ver3_test'
+name = 'FK_ver3_full_transform'
 test = False
 lambda_recon = 0.5
 lambda_reg = 1-lambda_recon
